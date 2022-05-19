@@ -1,6 +1,4 @@
 pub mod language {
-    // use std::fmt;
-
     #[derive(Debug, Copy, Clone)]
     #[allow(dead_code)]
     pub enum MutableModifier {
@@ -14,7 +12,7 @@ pub mod language {
         Int32,
         String,
         Pair(Box<Type>, Box<Type>),
-        Reference(MutableModifier, Box<Type>),
+        Reference(Box<Type>),
     }
 
     #[derive(Debug)]
@@ -34,7 +32,7 @@ pub mod language {
         Pair(Box<Expr>, Box<Expr>),
         First(Box<Expr>),
         Second(Box<Expr>),
-        Reference(String),
+        Reference(MutableModifier, Box<Expr>),
         Add(Box<Expr>, Box<Expr>),
         Get(String),
         Dereference(Box<Expr>),
