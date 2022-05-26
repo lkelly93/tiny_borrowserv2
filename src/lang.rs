@@ -32,7 +32,7 @@ pub mod language {
         Pair(Box<Expr>, Box<Expr>),
         First(Box<Expr>),
         Second(Box<Expr>),
-        Reference(MutableModifier, Box<Expr>),
+        Reference(MutableModifier, String),
         Add(Box<Expr>, Box<Expr>),
         Get(String),
         Dereference(Box<Expr>),
