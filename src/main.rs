@@ -7,17 +7,6 @@ use lang::language::Type;
 use std::collections::HashMap;
 
 fn main() {
-    // let mut a = "hi";
-    // let mut b = &"b";
-    // let mut c = &"world";
-    // if 5 == 5 {
-    //     b = &a;
-    // } else {
-    //     c = &a;
-    // }
-    // let mut d = &mut a;
-    // println!("{}, {}, {}", b, c, d);
-
     /* Equivalent Program:
         let mut a = "a";
         let mut b = "b";
@@ -187,7 +176,50 @@ fn main() {
             Box::new(Expr::Reference(MutableModifier::Mutable, String::from("b"))),
         ), // let mut d = &mut a; (THIS IS THE FAILURE, HOPEFULLY :D );
     ]);
-    borrow_check(&ifprog3);
+    // borrow_check(&ifprog3);
+
+    /* Equivalent Program:
+        let mut a = "a";
+        let mut b = &mut a;
+        let mut c = "c";
+        b = &c;
+        let mut d = &a;
+    */
+    // Assignments should remove previous variants.
+    let assignment_prog = Statement::Scope(vec![
+        Statement::Let(
+            String::from("a"),
+            MutableModifier::Mutable,
+            Type::String,
+            Box::new(Expr::String(String::from("a"))),
+        ), // let mut a = "a";
+        Statement::Let(
+            String::from("b"),
+            MutableModifier::Mutable,
+            Type::Reference(Box::new(Type::String)),
+            Box::new(Expr::Reference(MutableModifier::Mutable, String::from("a"))),
+        ), // let mut b = &mut b;
+        Statement::Let(
+            String::from("c"),
+            MutableModifier::Mutable,
+            Type::String,
+            Box::new(Expr::String(String::from("c"))),
+        ), // let mut c = "a";
+        Statement::Assign(
+            String::from("b"),
+            Box::new(Expr::Reference(
+                MutableModifier::Immutable,
+                String::from("c"),
+            )),
+        ), //  b = &c
+        Statement::Let(
+            String::from("d"),
+            MutableModifier::Mutable,
+            Type::Reference(Box::new(Type::String)),
+            Box::new(Expr::Reference(MutableModifier::Mutable, String::from("a"))),
+        ), // let mut c = &"world";
+    ]);
+    borrow_check(&assignment_prog);
 }
 
 fn borrow_check(program: &Statement) {
@@ -196,7 +228,7 @@ fn borrow_check(program: &Statement) {
     match program {
         Statement::Scope(statements) => {
             for s in statements.iter() {
-                // println!("{:?}", s);
+                println!("{:?}", s);
                 if !borrow_check_helper(s, &mut referenced_map, &mut assignments_map) {
                     println!("Invalid on {:?}", s);
                     return;
