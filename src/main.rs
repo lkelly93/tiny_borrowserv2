@@ -6,12 +6,6 @@ use lang::language::Type;
 
 use std::collections::HashMap;
 
-#[derive(Debug, Clone)]
-struct ReferenceInfo {
-    reference_holder: String,
-    reference_type: MutableModifier,
-}
-
 fn main() {
     // let mut a = "hi";
     // let mut b = &"b";
@@ -19,7 +13,7 @@ fn main() {
     // if 5 == 5 {
     //     b = &a;
     // } else {
-    //     c = &mut a;
+    //     c = &a;
     // }
     // let mut d = &mut a;
     // println!("{}, {}, {}", b, c, d);
@@ -31,7 +25,7 @@ fn main() {
         if 0 {
             b = &a;
         } else {
-            c = &mut a;
+            c = &a;
         }
         let mut d = &mut a;
     */
@@ -58,18 +52,21 @@ fn main() {
             // if false
             Box::new(Expr::Int32(0)),
             // { b = &a
-            Box::new(Statement::Assign(
+            Box::new(Statement::Scope(vec![Statement::Assign(
                 String::from("b"),
                 Box::new(Expr::Reference(
                     MutableModifier::Immutable,
                     String::from("a"),
                 )),
-            )),
-            // { c = &mut a
-            Box::new(Statement::Assign(
+            )])),
+            Box::new(Statement::Scope(vec![Statement::Assign(
                 String::from("c"),
-                Box::new(Expr::Reference(MutableModifier::Mutable, String::from("a"))),
-            )),
+                Box::new(Expr::Reference(
+                    MutableModifier::Immutable,
+                    String::from("a"),
+                )),
+            )])),
+            // { c = &mut a
         ),
         Statement::Let(
             String::from("d"),
@@ -78,138 +75,348 @@ fn main() {
             Box::new(Expr::Reference(MutableModifier::Mutable, String::from("a"))),
         ), // let mut d = &mut a; (THIS IS THE FAILURE, HOPEFULLY :D );
     ]);
-    let mut vars: HashMap<String, HashMap<String, MutableModifier>> = HashMap::new();
-    borrow_check(&ifprog, &mut vars);
-    println!("Debug Point");
+    // borrow_check(&ifprog);
+
+    // Same as ifprog1 but valid.
+    let ifprog2 = Statement::Scope(vec![
+        Statement::Let(
+            String::from("a"),
+            MutableModifier::Mutable,
+            Type::String,
+            Box::new(Expr::String(String::from("a"))),
+        ), // let mut a = "hi";
+        Statement::Let(
+            String::from("b"),
+            MutableModifier::Mutable,
+            Type::Reference(Box::new(Type::String)),
+            Box::new(Expr::String(String::from("b"))),
+        ), // let mut f = &"f":
+        Statement::Let(
+            String::from("c"),
+            MutableModifier::Mutable,
+            Type::Reference(Box::new(Type::String)),
+            Box::new(Expr::String(String::from("c"))),
+        ), // let mut c = &"world";
+        Statement::If(
+            // if false
+            Box::new(Expr::Int32(0)),
+            // { b = &a
+            Box::new(Statement::Scope(vec![Statement::Assign(
+                String::from("b"),
+                Box::new(Expr::Reference(
+                    MutableModifier::Immutable,
+                    String::from("a"),
+                )),
+            )])),
+            Box::new(Statement::Scope(vec![Statement::Assign(
+                String::from("c"),
+                Box::new(Expr::Reference(
+                    MutableModifier::Immutable,
+                    String::from("a"),
+                )),
+            )])),
+            // { c = &mut a
+        ),
+    ]);
+    // borrow_check(&ifprog2);
+
+    /* Equivalent Program:
+        let mut a = "a";
+        let mut b = "b";
+        let mut c = "c";
+        if 0 {
+            c = &a;
+        } else {
+            c = &b;
+        }
+        let d = &mut a;
+    */
+    // This is a test case for different branches with same lvalue.
+    let ifprog3 = Statement::Scope(vec![
+        Statement::Let(
+            String::from("a"),
+            MutableModifier::Mutable,
+            Type::String,
+            Box::new(Expr::String(String::from("a"))),
+        ), // let mut a = "hi";
+        Statement::Let(
+            String::from("b"),
+            MutableModifier::Mutable,
+            Type::Reference(Box::new(Type::String)),
+            Box::new(Expr::String(String::from("b"))),
+        ), // let mut f = &"f":
+        Statement::Let(
+            String::from("c"),
+            MutableModifier::Mutable,
+            Type::Reference(Box::new(Type::String)),
+            Box::new(Expr::String(String::from("c"))),
+        ), // let mut c = &"world";
+        Statement::If(
+            // if false
+            Box::new(Expr::Int32(0)),
+            // { b = &a
+            Box::new(Statement::Scope(vec![Statement::Assign(
+                String::from("c"),
+                Box::new(Expr::Reference(
+                    MutableModifier::Immutable,
+                    String::from("a"),
+                )),
+            )])),
+            Box::new(Statement::Scope(vec![Statement::Assign(
+                String::from("c"),
+                Box::new(Expr::Reference(
+                    MutableModifier::Immutable,
+                    String::from("b"),
+                )),
+            )])),
+            // { c = &mut a
+        ),
+        /*
+         * This should fail whether I mut borrow a or b.
+         */
+        // Statement::Let(
+        //     String::from("d"),
+        //     MutableModifier::Mutable,
+        //     Type::Reference(Box::new(Type::String)),
+        //     Box::new(Expr::Reference(MutableModifier::Mutable, String::from("a"))),
+        // ), // let mut d = &mut a; (THIS IS THE FAILURE, HOPEFULLY :D );
+        Statement::Let(
+            String::from("d"),
+            MutableModifier::Mutable,
+            Type::Reference(Box::new(Type::String)),
+            Box::new(Expr::Reference(MutableModifier::Mutable, String::from("b"))),
+        ), // let mut d = &mut a; (THIS IS THE FAILURE, HOPEFULLY :D );
+    ]);
+    borrow_check(&ifprog3);
 }
+
+fn borrow_check(program: &Statement) {
+    let mut referenced_map: HashMap<String, HashMap<String, MutableModifier>> = HashMap::new();
+    let mut assignments_map: HashMap<String, Vec<String>> = HashMap::new();
+    match program {
+        Statement::Scope(statements) => {
+            for s in statements.iter() {
+                // println!("{:?}", s);
+                if !borrow_check_helper(s, &mut referenced_map, &mut assignments_map) {
+                    println!("Invalid on {:?}", s);
+                    return;
+                }
+                for (key, value) in referenced_map.iter() {
+                    println!("{}:{:?}", key, value);
+                }
+            }
+            println!("Valid!");
+        }
+        _ => println!("Only call me with Statement::Scopes."),
+    }
+}
+
 /**
  * borrow_check assumes the program is already type checked.
  */
-fn borrow_check(
+fn borrow_check_helper(
     program: &Statement,
-    vars: &mut HashMap<String, HashMap<String, MutableModifier>>,
+    referenced_map: &mut HashMap<String, HashMap<String, MutableModifier>>,
+    assignments_map: &mut HashMap<String, Vec<String>>,
 ) -> bool {
     match program {
-        // Statement::Scope(vec) => {
-        //     let mut new_vars: HashMap<String, Box<Vec<ReferenceInfo>>> = HashMap::new();
-        //     for (key, value) in &*vars {
-        //         new_vars.insert(key.clone(), Box::new((**value).clone()));
-        //     }
+        Statement::Scope(statements) => {
+            let mut new_ref_map = referenced_map.clone();
+            let mut new_assign_map = assignments_map.clone();
+            for statement in statements.iter() {
+                if !borrow_check_helper(statement, &mut new_ref_map, &mut new_assign_map) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        Statement::If(_, then_case, else_case) => match (&**then_case, &**else_case) {
+            (Statement::Scope(then_scope), Statement::Scope(else_scope)) => {
+                let mut then_ref_map = referenced_map.clone();
+                let mut then_assign_map = assignments_map.clone();
+                for statement in then_scope.iter() {
+                    if !borrow_check_helper(statement, &mut then_ref_map, &mut then_assign_map) {
+                        return false;
+                    }
+                }
 
-        //     let mut new_ass: HashMap<String, String> = HashMap::new();
-        //     for (key, value) in &*assignments {
-        //         new_ass.insert(key.clone(), value.clone());
-        //     }
-        //     for s in vec.iter() {
-        //         if !borrow_check(s, &mut new_vars, &mut new_ass) {
-        //             return false;
-        //         }
-        //     }
-        //     println!("{:?}", new_vars);
-        //     println!("{:?}", new_ass);
-        //     return true;
-        // }
-        Statement::Let(new_var, _, _, expr) => vars.get(),
-        Statement::Assign(old_var, expr) => {
-            match assignments.get(old_var) {
-                Some(s) => match vars.get_mut(s) {
-                    Some(r_infos) => {
-                        let mut idx = 0 as usize;
-                        while idx < r_infos.len() {
-                            let r_info = &r_infos[idx];
-                            if old_var.eq(&r_info.reference_holder) {
-                                r_infos.remove(idx);
-                                continue;
+                let mut else_ref_map = referenced_map.clone();
+                let mut else_assign_map = assignments_map.clone();
+                for statement in else_scope.iter() {
+                    if !borrow_check_helper(statement, &mut else_ref_map, &mut else_assign_map) {
+                        return false;
+                    }
+                }
+                // Since we only allow scopes in Ifs we only care about variables that existed before the If
+                for (key, value) in assignments_map.iter_mut() {
+                    let then_vec = then_assign_map.get_mut(key).expect("This should never happen, Luke(this is actually always true) is an idiot or you wrote your program wrong if it does.");
+                    // This could cause duplicates in the vec... I don't think we care about this.
+                    value.append(&mut then_vec.clone());
+                    for referenced_var in then_vec.iter() {
+                        let new_mod = then_ref_map
+                            .get(referenced_var)
+                            .expect("it exists")
+                            .get(key)
+                            .expect("it also exists")
+                            .clone();
+
+                        let previous = referenced_map
+                            .entry(referenced_var.clone())
+                            .or_insert(HashMap::new()) // If we insert that means there has never been a reference to this var before.
+                            .insert(key.clone(), new_mod);
+                        if matches!(previous, Some(MutableModifier::Mutable)) {
+                            if matches!(new_mod, MutableModifier::Mutable) {
+                                // Double Mutable, FAIL.
+                                println!("Two mutable references of {} found.", referenced_var);
+                                return false;
+                            } else {
+                                // We overwrote a Mutable with Immutable, undo that.
+                                referenced_map
+                                    .get_mut(referenced_var)
+                                    .expect("WE LITERALLY ALREADY SAW IT. WTF?!")
+                                    .insert(key.clone(), MutableModifier::Mutable);
                             }
-                            idx += 1;
                         }
                     }
-                    None => (),
-                },
-                None => (),
+
+                    let else_vec = else_assign_map.get_mut(key).expect("This should never happen, Luke is an idiot or you wrote your program wrong if it does.");
+                    value.append(&mut else_vec.clone());
+                    for referenced_var in else_vec.iter() {
+                        let new_mod = else_ref_map
+                            .get(referenced_var)
+                            .expect("it exists")
+                            .get(key)
+                            .expect("it also exists")
+                            .clone();
+
+                        let previous = referenced_map
+                            .entry(referenced_var.clone())
+                            .or_insert(HashMap::new()) // If we insert that means there has never been a reference to this var before.
+                            .insert(key.clone(), new_mod);
+                        if matches!(previous, Some(MutableModifier::Mutable)) {
+                            if matches!(new_mod, MutableModifier::Mutable) {
+                                // Double Mutable, FAIL.
+                                println!("Two mutable references of {} found.", referenced_var);
+                                return false;
+                            } else {
+                                // We overwrote a Mutable with Immutable, undo that.
+                                referenced_map
+                                    .get_mut(referenced_var)
+                                    .expect("WE LITERALLY ALREADY SAW IT. WTF?!")
+                                    .insert(key.clone(), MutableModifier::Mutable);
+                            }
+                        }
+                    }
+                }
+                return true;
             }
-            borrow_check_expr(old_var.clone(), expr, vars);
-            return true;
-        } // asdfas
-          // Statement::If(_, then_statement, else_statement) => {
-          //     let mut else_vars: HashMap<String, Box<Vec<ReferenceInfo>>> = HashMap::new();
-          //     for (key, value) in &*vars {
-          //         else_vars.insert(key.clone(), value.clone());
-          //     }
+            _ => {
+                println!("If branches must be Scopes.");
+                return false;
+            }
+        },
+        Statement::Let(lvalue, _, _, rvalue) => match borrow_check_expr(rvalue) {
+            None => {
+                assignments_map.insert(lvalue.clone(), Vec::new());
+                return true;
+            }
+            Some(vec) => {
+                if !assignments_map.contains_key(lvalue) {
+                    let tmp = Vec::new();
+                    assignments_map.insert(lvalue.clone(), tmp);
+                }
+                let assignment_vec: &mut Vec<String> =
+                    assignments_map.get_mut(lvalue).expect("Fatal Error!");
 
-          //     let mut else_ass: HashMap<String, String> = HashMap::new();
-          //     for (key, value) in &*assignments {
-          //         else_ass.insert(key.clone(), value.clone());
-          //     }
+                for (modifier, referenced_var) in vec.iter() {
+                    assignment_vec.push(referenced_var.clone());
 
-          //     // Use current data for left pass. We want to merge later anyway.
-          //     // No need to copy extra data.
-          //     if !(borrow_check(then_statement, vars, assignments)
-          //         && borrow_check(else_statement, &mut else_vars, &mut else_ass))
-          //     {
-          //         return false;
-          //     }
+                    if !referenced_map.contains_key(referenced_var) {
+                        let tmp: HashMap<String, MutableModifier> = HashMap::new();
+                        referenced_map.insert(referenced_var.clone(), tmp);
+                    }
+                    let map_of_referencees: &mut HashMap<String, MutableModifier> = referenced_map
+                        .get_mut(referenced_var)
+                        .expect("Fatal Error!");
 
-          //     // Merge Everything
-          //     for (key, value) in else_vars.iter_mut() {
-          //         match vars.get_mut(key) {
-          //             Some(old_info) => for r in old_info.iter() {},
-          //             None => {
-          //                 let temp = &**value;
-          //                 let new_val = temp.clone();
-          //                 vars.insert(key.clone(), Box::new(new_val));
-          //             }
-          //         }
-          //     }
-          //     return true;
-          // }
+                    if matches!(modifier, MutableModifier::Mutable) {
+                        // No other references allowed when mutable reference exists.
+                        if map_of_referencees.len() != 0 {
+                            return false;
+                        }
+                    }
+                    map_of_referencees.insert(lvalue.clone(), modifier.clone());
+                }
+                return true;
+            }
+        },
+        Statement::Assign(lvalue, rvalue) => match borrow_check_expr(rvalue) {
+            // Clear assignment vecl
+            None => return true,
+            Some(vec) => {
+                if matches!(assignments_map.get(lvalue), None) {
+                    // This variable has never been a reference before.
+                    assignments_map.insert(lvalue.clone(), Vec::new());
+                }
+                let assignment_vec: &mut Vec<String> = assignments_map
+                    .get_mut(lvalue)
+                    .expect("This should never happen... I just inserted it.");
+                for referenced_var in assignment_vec.iter() {
+                    referenced_map
+                        .get_mut(referenced_var)
+                        .expect("referenced_var not in referencedMap this is a type error.")
+                        .remove(lvalue);
+                }
+                // If this is a new reference... thats ok even though this clear is wasted cycles.
+                assignment_vec.clear();
+                for (modifier, referenced_var) in vec.iter() {
+                    assignment_vec.push(referenced_var.clone());
+
+                    if !referenced_map.contains_key(referenced_var) {
+                        let tmp: HashMap<String, MutableModifier> = HashMap::new();
+                        referenced_map.insert(referenced_var.clone(), tmp);
+                    }
+                    let map_of_referencees: &mut HashMap<String, MutableModifier> = referenced_map
+                        .get_mut(referenced_var)
+                        .expect("I just put it there!?!?");
+
+                    if matches!(modifier, MutableModifier::Mutable) {
+                        for (_, mod_type) in map_of_referencees.iter() {
+                            if matches!(mod_type, MutableModifier::Mutable) {
+                                return false;
+                            }
+                        }
+                    }
+                    map_of_referencees.insert(lvalue.clone(), modifier.clone());
+                }
+                return true;
+            }
+        },
     }
 }
 
-fn borrow_check_expr(
-    new_var: String,
-    expr: &Expr,
-    vars: &mut HashMap<String, HashMap<String, MutableModifier>>,
-) -> (bool, bool, String) {
-    let mut valid = true;
-    let mut is_reference = false;
-    let mut reference_id: String = String::from("JUNK");
+fn borrow_check_expr(expr: &Expr) -> Option<Vec<(MutableModifier, String)>> {
     match expr {
-        Expr::Int32(_) => (),
-        Expr::String(_) => (),
-        Expr::Pair(a, b) => {
-            // Some issues here if Reference takes an Expr::Reference instead of a string
-            let (a_valid, _, _) = borrow_check_expr(new_var.clone(), a, vars);
-            let (b_valid, _, _) = borrow_check_expr(new_var.clone(), b, vars);
-            valid = a_valid && b_valid;
-        }
-        Expr::First(f) => {
-            // Some issues here if Reference takes an Expr::Reference instead of a string
-            let (v, _, _) = borrow_check_expr(new_var, f, vars);
-            valid = v;
-        }
-        Expr::Second(s) => {
-            // Some issues here if Reference takes an Expr::Reference instead of a string
-            let (v, _, _) = borrow_check_expr(new_var, s, vars);
-            valid = v;
-        }
-        Expr::Reference(modifier, var) => match vars.get(var) {
-            Some(cur_map) => match cur_map.get(new_var)
-
-            }
-            None => {
-                let new_map: HashMap<String, MutableModifier> = HashMap::new();
-                new_map.insert(new_var, modifier.clone());
-                vars.insert(var.clone(), new_map);
+        Expr::Int32(_) => None,
+        Expr::String(_) => None,
+        Expr::Pair(a, b) => match (borrow_check_expr(a), borrow_check_expr(b)) {
+            (None, None) => None,
+            (r, None) => r,
+            (None, r) => r,
+            (Some(vec_left), Some(vec_right)) => {
+                let mut comb_vec = vec_left.clone();
+                for i in vec_right.iter() {
+                    comb_vec.push(i.clone());
+                }
+                return Option::Some(comb_vec);
             }
         },
-        Expr::Add(l, r) => {
-            let (a_valid, _, _) = borrow_check_expr(new_var.clone(), l, vars);
-            let (b_valid, _, _) = borrow_check_expr(new_var.clone(), r, vars);
-            valid = a_valid && b_valid;
-        }
-        Expr::Get(_) => (),
-        Expr::Dereference(_) => (),
+        Expr::First(f) => borrow_check_expr(f),
+        Expr::Second(s) => borrow_check_expr(s),
+        Expr::Reference(modifier, var) => Option::Some(vec![(*modifier, var.clone())]),
+        // Correct me if I am wrong but add can't add references???
+        Expr::Add(_, _) => None,
+        Expr::Get(_) => None,
+        Expr::Dereference(_) => None,
     }
-    return (valid, is_reference, reference_id);
 }

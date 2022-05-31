@@ -19,9 +19,10 @@ pub mod language {
     #[allow(dead_code)]
     pub enum Statement {
         Scope(Vec<Statement>),
+        // Let mut a: TYPE = EXPR
         Let(String, MutableModifier, Type, Box<Expr>),
         Assign(String, Box<Expr>),
-        If(Box<Expr>, Box<Statement>, Box<Statement>),
+        If(Box<Expr>, Box<Statement>, Box<Statement>), // The branches of IFs must be scopes
     }
 
     #[derive(Debug)]
